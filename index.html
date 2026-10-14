@@ -3,33 +3,96 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#101522">
-  <title>CallSpace — Chamadas de vídeo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>CallSpace</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>CallSpace</h1>
-    <p>Conecte-se com seus amigos.</p>
+  <header class="topbar">
+    <h1>CallSpace<span>.</span></h1>
   </header>
 
   <main>
-    <section id="home">
-      <h2>Sua próxima conversa começa aqui.</h2>
-      <button id="createRoom" type="button">Criar sala</button>
+    <section id="home" class="home">
+      <div class="intro">
+        <p class="eyebrow">VIDEOCHAMADAS SIMPLES</p>
+        <h2>Conecte-se com<br>quem importa.</h2>
+        <p class="subtext">Crie uma sala ou entre em uma existente.</p>
+      </div>
 
-      <div>
-        <input
-          id="roomCode"
-          type="text"
-          placeholder="Digite o código da sala"
-          autocomplete="off"
-        >
-        <button id="joinRoom" type="button">Entrar na sala</button>
+      <div class="panel">
+        <label for="displayName">Seu nome na call</label>
+        <input id="displayName" maxlength="30"
+          placeholder="Como quer aparecer?" autocomplete="nickname">
+
+        <button id="createRoom" class="button primary" type="button">
+          Criar call <span>↗</span>
+        </button>
+
+        <div id="createdRoom" class="created-room" hidden>
+          <span class="muted">Código da sua sala</span>
+          <div class="code-line">
+            <strong id="roomCodeDisplay"></strong>
+            <button id="copyCode" class="copy-button" type="button">Copiar</button>
+          </div>
+          <p>Compartilhe o código com seus amigos.</p>
+        </div>
+
+        <div class="separator"><span>OU</span></div>
+
+        <button id="joinRoom" class="button secondary" type="button">
+          Entrar na call <span>→</span>
+        </button>
+
+        <div id="joinPanel" class="join-panel" hidden>
+          <label for="roomCode">Código da sala</label>
+          <input id="roomCode" maxlength="100"
+            placeholder="Digite o código" autocomplete="off">
+          <button id="confirmJoin" class="button primary" type="button">
+            Entrar agora
+          </button>
+        </div>
+
+        <p id="homeStatus" class="status" role="status"></p>
+      </div>
+    </section>
+
+    <section id="callScreen" class="call-screen" hidden>
+      <div class="call-heading">
+        <div>
+          <p class="eyebrow">CALLSPACE / AO VIVO</p>
+          <h2>Sua chamada</h2>
+        </div>
+        <div class="room-badge">
+          Sala <strong id="activeRoom"></strong>
+        </div>
+      </div>
+
+      <p id="callStatus" class="status" role="status">
+        Preparando chamada...
+      </p>
+
+      <div id="videos" class="videos"></div>
+
+      <div class="call-controls">
+        <button id="micButton" class="control" type="button">
+          <span class="control-icon">🎙</span>
+          <span id="micLabel">Microfone</span>
+        </button>
+        <button id="cameraButton" class="control" type="button">
+          <span class="control-icon">▣</span>
+          <span id="cameraLabel">Câmera</span>
+        </button>
+        <button id="leaveButton" class="control leave" type="button">
+          <span class="control-icon">✕</span>
+          <span>Sair</span>
+        </button>
       </div>
     </section>
   </main>
+
+  <footer>CallSpace · Converse à sua maneira.</footer>
 
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script src="app.js"></script>
