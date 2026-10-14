@@ -1,19 +1,29 @@
 
 "use strict";
 
-const SOCKET_SERVER = "https://callspace-y55m.onrender.com";
+const SERVER_URL = "https://callspace-y55m.onrender.com";
 
-const createButton = document.getElementById("createRoom");
-const joinButton = document.getElementById("joinRoom");
-const roomInput = document.getElementById("roomCode");
+const $ = id => document.getElementById(id);
+
+const home = $("home");
+const callScreen = $("callScreen");
+const nameInput = $("displayName");
+const createButton = $("createRoom");
+const joinButton = $("joinRoom");
+const roomInput = $("roomCode");
+const joinPanel = $("joinPanel");
+const confirmJoin = $("confirmJoin");
 
 let socket = null;
 let localStream = null;
 let currentRoom = null;
-let isLeaving = false;
+let displayName = "Participante";
+let joined = false;
+let leaving = false;
 
 const peers = new Map();
 const remoteCards = new Map();
+const remoteNames = new Map();
 const pendingCandidates = new Map();
 
 const rtcConfig = {
@@ -22,160 +32,173 @@ const rtcConfig = {
   ]
 };
 
-function setStatus(message) {
-  const status = document.getElementById("callStatus");
-  if (status) status.textContent = message;
+function setHomeStatus(message) {
+  const element = $("homeStatus");
+  if (element) element.textContent = message;
 }
 
-function generateRoomCode() {
+function setCallStatus(message) {
+  const element = $("callStatus");
+  if (element) element.textContent = message;
+}
+
+function makeRoomCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
+function showHome() {
+  home.hidden = false;
+  callScreen.hidden = true;
+}
+
+function showCall() {
+  home.hidden = true;
+  callScreen.hidden = false;
+  $("activeRoom").textContent = currentRoom;
+}
+
+function getName() {
+  const name = nameInput.value.trim();
+
+  if (!name) {
+    setHomeStatus("Digite seu nome antes de continuar.");
+    nameInput.focus();
+    return null;
+  }
+
+  return name.slice(0, 30);
+}
+
 function createRoom() {
-  startCall(generateRoomCode());
+  if (currentRoom) return;
+
+  const name = getName();
+  if (!name) return;
+
+  displayName = name;
+  currentRoom = makeRoomCode();
+
+  $("roomCodeDisplay").textContent = currentRoom;
+  $("createdRoom").hidden = false;
+  roomInput.value = currentRoom;
+
+  beginCall();
+}
+
+function openJoinPanel() {
+  joinPanel.hidden = !joinPanel.hidden;
+
+  if (!joinPanel.hidden) {
+    roomInput.focus();
+  }
 }
 
 function joinRoom() {
-  const code = roomInput?.value.trim().toUpperCase();
+  if (currentRoom) return;
+
+  const name = getName();
+  if (!name) return;
+
+  const code = roomInput.value.trim().toUpperCase();
 
   if (!code) {
-    alert("Digite o código da sala!");
-    roomInput?.focus();
+    setHomeStatus("Digite o código da sala.");
+    roomInput.focus();
     return;
   }
 
   if (!/^[A-Z0-9_-]{1,100}$/.test(code)) {
-    alert("O código da sala contém caracteres inválidos.");
+    setHomeStatus("Esse código contém caracteres inválidos.");
     return;
   }
 
-  startCall(code);
+  displayName = name;
+  currentRoom = code;
+  beginCall();
 }
 
-if (createButton) {
-  createButton.addEventListener("click", createRoom);
-} else {
-  console.error("CallSpace: botão createRoom não encontrado.");
-}
+createButton.addEventListener("click", createRoom);
+joinButton.addEventListener("click", openJoinPanel);
+confirmJoin.addEventListener("click", joinRoom);
 
-if (joinButton) {
-  joinButton.addEventListener("click", joinRoom);
-} else {
-  console.error("CallSpace: botão joinRoom não encontrado.");
-}
+roomInput.addEventListener("keydown", event => {
+  if (event.key === "Enter") joinRoom();
+});
 
-function showCallScreen(code) {
-  document.body.innerHTML = `
-    <main style="
-      min-height:100vh;background:#101522;color:#fff;
-      padding:20px;box-sizing:border-box;
-      font-family:Arial,sans-serif">
-      <h1>CallSpace</h1>
-      <p>Sala: <strong id="activeRoom"></strong></p>
-      <button id="copyLink" type="button">Copiar link da sala</button>
-      <p id="callStatus">Preparando chamada...</p>
-      <section id="videos" style="
-        display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-        gap:12px;margin-top:20px"></section>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:20px">
-        <button id="micButton" type="button">Desligar microfone</button>
-        <button id="cameraButton" type="button">Desligar câmera</button>
-        <button id="leaveButton" type="button">Sair da sala</button>
-      </div>
-    </main>
-  `;
+nameInput.addEventListener("input", () => {
+  if (nameInput.value.length > 30) {
+    nameInput.value = nameInput.value.slice(0, 30);
+  }
+});
 
-  document.getElementById("activeRoom").textContent = code;
+$("copyCode").addEventListener("click", async () => {
+  if (!currentRoom) return;
 
-  document.getElementById("copyLink").onclick = async () => {
-    const url = new URL(location.href);
-    url.searchParams.set("room", code);
+  const link = new URL(location.href);
+  link.searchParams.set("room", currentRoom);
 
-    try {
-      await navigator.clipboard.writeText(url.href);
-      alert("Link copiado!");
-    } catch {
-      prompt("Copie este link:", url.href);
-    }
-  };
+  try {
+    await navigator.clipboard.writeText(link.href);
+    $("copyCode").textContent = "Copiado!";
+    setTimeout(() => {
+      if ($("copyCode")) $("copyCode").textContent = "Copiar";
+    }, 1800);
+  } catch {
+    prompt("Copie o link da sala:", link.href);
+  }
+});
 
-  document.getElementById("micButton").onclick = () => {
-    const track = localStream?.getAudioTracks()[0];
-    if (!track) return;
+function addVideo(id, name, stream, isLocal = false) {
+  const container = $("videos");
+  if (!container) return;
 
-    track.enabled = !track.enabled;
-    document.getElementById("micButton").textContent =
-      track.enabled ? "Desligar microfone" : "Ligar microfone";
-  };
+  const existing = isLocal ? $("video-local") : remoteCards.get(id);
 
-  document.getElementById("cameraButton").onclick = () => {
-    const track = localStream?.getVideoTracks()[0];
-    if (!track) return;
-
-    track.enabled = !track.enabled;
-    document.getElementById("cameraButton").textContent =
-      track.enabled ? "Desligar câmera" : "Ligar câmera";
-  };
-
-  document.getElementById("leaveButton").onclick = leaveCall;
-}
-
-function addVideo(id, name, stream, muted = false) {
-  const videos = document.getElementById("videos");
-  if (!videos) return null;
-
-  let card = id === "local" ? document.getElementById("video-local") : remoteCards.get(id);
-
-  if (card) {
-    const video = card.querySelector("video");
+  if (existing) {
+    const video = existing.querySelector("video");
     if (video && video.srcObject !== stream) video.srcObject = stream;
-    return card;
+    const label = existing.querySelector(".video-name");
+    if (label) label.textContent = name;
+    return existing;
   }
 
-  card = document.createElement("article");
-  card.id = id === "local" ? "video-local" : `video-${id}`;
-  card.style.cssText =
-    "background:#20283a;padding:10px;border-radius:12px;min-width:0";
-
-  const label = document.createElement("p");
-  label.textContent = name;
+  const card = document.createElement("article");
+  card.className = "video-card";
+  card.id = isLocal ? "video-local" : `video-${id}`;
 
   const video = document.createElement("video");
   video.autoplay = true;
   video.playsInline = true;
-  video.muted = muted;
+  video.muted = isLocal;
   video.srcObject = stream;
-  video.style.cssText =
-    "width:100%;background:#05070b;border-radius:8px";
 
-  card.append(label, video);
-  videos.appendChild(card);
+  const label = document.createElement("p");
+  label.className = "video-name";
+  label.textContent = name;
 
-  if (id !== "local") remoteCards.set(id, card);
+  card.append(video, label);
+  container.appendChild(card);
+
   video.play().catch(() => {});
 
+  if (!isLocal) remoteCards.set(id, card);
   return card;
 }
 
-function removePeer(peerId) {
-  const pc = peers.get(peerId);
-  if (pc) pc.close();
+function updateRemoteName(id, name) {
+  remoteNames.set(id, name || "Participante");
 
-  peers.delete(peerId);
-  pendingCandidates.delete(peerId);
+  const card = remoteCards.get(id);
+  const label = card?.querySelector(".video-name");
 
-  const card = remoteCards.get(peerId);
-  if (card) card.remove();
-
-  remoteCards.delete(peerId);
+  if (label) label.textContent = remoteNames.get(id);
 }
 
-function sendToPeer(eventName, peerId, data) {
+function emitToPeer(eventName, targetId, data) {
   if (!socket?.connected) return;
 
   socket.emit(eventName, {
-    targetId: peerId,
+    targetId,
     data
   });
 }
@@ -188,14 +211,14 @@ function createPeer(peerId) {
   pendingCandidates.set(peerId, []);
 
   if (localStream) {
-    for (const track of localStream.getTracks()) {
+    localStream.getTracks().forEach(track => {
       pc.addTrack(track, localStream);
-    }
+    });
   }
 
   pc.onicecandidate = event => {
     if (event.candidate) {
-      sendToPeer("webrtc-ice-candidate", peerId, event.candidate);
+      emitToPeer("webrtc-ice-candidate", peerId, event.candidate);
     }
   };
 
@@ -206,35 +229,22 @@ function createPeer(peerId) {
       stream = new MediaStream([event.track]);
     }
 
-    const card = remoteCards.get(peerId);
+    addVideo(
+      peerId,
+      remoteNames.get(peerId) || "Participante",
+      stream
+    );
 
-    if (card) {
-      const video = card.querySelector("video");
-
-      if (video) {
-        if (!video.srcObject || video.srcObject !== stream) {
-          video.srcObject = stream;
-        }
-
-        if (!event.streams[0] && !video.srcObject.getTracks().includes(event.track)) {
-          video.srcObject.addTrack(event.track);
-        }
-      }
-    } else {
-      const remoteStream = event.streams[0] || new MediaStream([event.track]);
-      addVideo(peerId, "Participante", remoteStream);
-    }
-
-    setStatus("Participante conectado!");
+    setCallStatus("Chamada conectada!");
   };
 
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected") {
-      setStatus("Chamada conectada!");
+      setCallStatus("Chamada conectada!");
     } else if (pc.connectionState === "failed") {
-      setStatus("Falha na conexão. Tente novamente.");
+      setCallStatus("Falha na conexão. Tente novamente.");
     } else if (pc.connectionState === "disconnected") {
-      setStatus("Conexão interrompida. Tentando recuperar...");
+      setCallStatus("Conexão interrompida.");
     }
   };
 
@@ -249,74 +259,104 @@ async function flushCandidates(peerId, pc) {
     try {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (error) {
-      console.error("Erro ao adicionar candidato ICE:", error);
+      console.error("Erro ao adicionar ICE:", error);
     }
   }
 }
 
-function setupSocketEvents() {
+function setupSocket() {
+  socket = io(SERVER_URL, {
+    reconnection: true,
+    reconnectionAttempts: 5,
+    timeout: 20000
+  });
+
   socket.on("connect", () => {
-    if (currentRoom && !isLeaving) {
-      socket.emit("join-room", currentRoom);
-      setStatus("Conectado ao servidor. Entrando na sala...");
-    }
+    if (leaving || !currentRoom || joined) return;
+
+    socket.emit("join-room", {
+      roomId: currentRoom,
+      displayName
+    });
   });
 
   socket.on("connect_error", error => {
-    console.error("Erro de conexão:", error.message);
-    setStatus("Não foi possível conectar ao servidor. Tente novamente.");
+    console.error("Socket.IO:", error.message);
+    setCallStatus("Não foi possível conectar ao servidor. Tentando novamente...");
   });
 
-  socket.on("room-users", async userIds => {
-    for (const peerId of userIds) {
+  socket.on("room-joined", result => {
+    joined = true;
+    setCallStatus(
+      result?.message || "Sala conectada. Aguardando participantes..."
+    );
+  });
+
+  socket.on("room-error", message => {
+    setCallStatus(message || "Não foi possível entrar na sala.");
+  });
+
+  socket.on("room-users", async users => {
+    for (const user of users) {
+      const peerId = typeof user === "string" ? user : user.id;
+      if (!peerId || peerId === socket.id) continue;
+
+      if (user.displayName) {
+        updateRemoteName(peerId, user.displayName);
+      }
+
       try {
         const pc = createPeer(peerId);
         const offer = await pc.createOffer();
 
         await pc.setLocalDescription(offer);
-
-        sendToPeer("webrtc-offer", peerId, pc.localDescription);
+        emitToPeer("webrtc-offer", peerId, pc.localDescription);
       } catch (error) {
-        console.error("Erro ao iniciar chamada:", error);
-        setStatus("Erro ao iniciar a conexão com o participante.");
+        console.error("Erro ao iniciar conexão:", error);
       }
     }
+  });
 
-    if (!userIds.length) {
-      setStatus("Sala criada! Aguardando outra pessoa...");
+  socket.on("user-joined", user => {
+    const peerId = typeof user === "string" ? user : user.id;
+    if (!peerId || peerId === socket.id) return;
+
+    if (user.displayName) {
+      updateRemoteName(peerId, user.displayName);
     }
+
+    setCallStatus(`${user.displayName || "Um participante"} entrou na sala.`);
   });
 
-  socket.on("user-joined", () => {
-    setStatus("Alguém entrou na sala. Conectando...");
-  });
-
-  socket.on("webrtc-offer", async ({ senderId, data }) => {
+  socket.on("webrtc-offer", async ({ senderId, senderName, data }) => {
     try {
-      const pc = createPeer(senderId);
+      if (senderName) updateRemoteName(senderId, senderName);
 
+      const pc = createPeer(senderId);
       await pc.setRemoteDescription(new RTCSessionDescription(data));
       await flushCandidates(senderId, pc);
 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      sendToPeer("webrtc-answer", senderId, pc.localDescription);
+      emitToPeer("webrtc-answer", senderId, pc.localDescription);
     } catch (error) {
-      console.error("Erro ao responder oferta:", error);
-      setStatus("Erro ao negociar a chamada.");
+      console.error("Erro ao responder chamada:", error);
+      setCallStatus("Erro ao estabelecer a chamada.");
     }
   });
 
-  socket.on("webrtc-answer", async ({ senderId, data }) => {
+  socket.on("webrtc-answer", async ({ senderId, senderName, data }) => {
     try {
+      if (senderName) updateRemoteName(senderId, senderName);
+
       const pc = peers.get(senderId);
       if (!pc) return;
 
       await pc.setRemoteDescription(new RTCSessionDescription(data));
       await flushCandidates(senderId, pc);
     } catch (error) {
-      console.error("Erro ao receber resposta:", error);
+      console.error("Erro na resposta WebRTC:", error);
     }
   });
 
@@ -335,81 +375,103 @@ function setupSocketEvents() {
 
       await pc.addIceCandidate(new RTCIceCandidate(data));
     } catch (error) {
-      console.error("Erro no candidato ICE:", error);
+      console.error("Erro ICE:", error);
     }
   });
 
-  socket.on("user-left", peerId => {
+  socket.on("user-left", user => {
+    const peerId = typeof user === "string" ? user : user.id;
+    if (!peerId) return;
+
     removePeer(peerId);
-    setStatus("Um participante saiu da sala.");
+    setCallStatus(`${user.displayName || "Um participante"} saiu da sala.`);
+  });
+
+  socket.on("disconnect", () => {
+    if (!leaving) setCallStatus("Conexão com o servidor perdida. Reconectando...");
+    joined = false;
   });
 }
 
-async function startCall(code) {
-  if (currentRoom) return;
+async function beginCall() {
+  leaving = false;
+  joined = false;
 
-  if (!navigator.mediaDevices?.getUserMedia) {
-    alert("Seu navegador não permite acesso à câmera. Abra o site por HTTPS em um navegador compatível.");
-    return;
-  }
-
-  if (typeof io !== "function") {
-    alert("O Socket.IO não carregou. Confira sua conexão com a internet e atualize a página.");
-    return;
-  }
-
-  currentRoom = code;
-  isLeaving = false;
-
-  if (createButton) createButton.disabled = true;
-  if (joinButton) joinButton.disabled = true;
-
-  showCallScreen(code);
-  setStatus("Solicitando acesso à câmera e ao microfone...");
+  showCall();
+  setCallStatus("Solicitando câmera e microfone...");
 
   try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Este navegador não permite acesso à câmera. Use HTTPS.");
+    }
+
     localStream = await navigator.mediaDevices.getUserMedia({
       video: true,
       audio: true
     });
 
-    addVideo("local", "Você", localStream, true);
-    setStatus("Câmera ativa. Conectando ao servidor...");
+    addVideo("local", displayName, localStream, true);
 
-    socket = io(SOCKET_SERVER, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      timeout: 20000
-    });
+    $("micButton").onclick = toggleMicrophone;
+    $("cameraButton").onclick = toggleCamera;
+    $("leaveButton").onclick = leaveCall;
 
-    setupSocketEvents();
-
-    if (socket.connected) {
-      socket.emit("join-room", currentRoom);
+    if (typeof io !== "function") {
+      throw new Error("O Socket.IO não carregou. Atualize a página.");
     }
+
+    setCallStatus("Conectando ao servidor...");
+    setupSocket();
   } catch (error) {
-    console.error("Erro ao iniciar CallSpace:", error);
-
-    setStatus("Não foi possível iniciar: " + error.message);
-
-    alert(
-      "Não foi possível iniciar a chamada.\n\n" +
-      error.message +
-      "\n\nConfira as permissões da câmera e do microfone."
-    );
+    console.error(error);
+    setCallStatus(error.message);
   }
 }
 
-function leaveCall() {
-  isLeaving = true;
+function toggleMicrophone() {
+  const track = localStream?.getAudioTracks()[0];
+  if (!track) return;
 
-  if (socket && currentRoom) {
-    socket.emit("leave-room", currentRoom);
+  track.enabled = !track.enabled;
+  $("micButton").classList.toggle("off", !track.enabled);
+  $("micLabel").textContent = track.enabled ? "Microfone" : "Mic desligado";
+}
+
+function toggleCamera() {
+  const track = localStream?.getVideoTracks()[0];
+  if (!track) return;
+
+  track.enabled = !track.enabled;
+  $("cameraButton").classList.toggle("off", !track.enabled);
+  $("cameraLabel").textContent = track.enabled ? "Câmera" : "Câmera desligada";
+}
+
+function removePeer(peerId) {
+  const pc = peers.get(peerId);
+  if (pc) pc.close();
+
+  peers.delete(peerId);
+  pendingCandidates.delete(peerId);
+
+  const card = remoteCards.get(peerId);
+  if (card) card.remove();
+
+  remoteCards.delete(peerId);
+  remoteNames.delete(peerId);
+}
+
+function leaveCall() {
+  leaving = true;
+
+  if (socket) {
+    if (socket.connected && currentRoom) {
+      socket.emit("leave-room", currentRoom);
+    }
     socket.disconnect();
+    socket = null;
   }
 
-  for (const peerId of peers.keys()) {
+  for (const peerId of [...peers.keys()]) {
     removePeer(peerId);
   }
 
@@ -418,13 +480,17 @@ function leaveCall() {
     localStream = null;
   }
 
-  const url = new URL(location.href);
-  url.searchParams.delete("room");
-  location.href = url.href;
+  currentRoom = null;
+  joined = false;
+
+  location.href = location.pathname;
 }
 
 const roomFromLink = new URLSearchParams(location.search).get("room");
 
-if (roomFromLink && roomInput) {
+if (roomFromLink) {
   roomInput.value = roomFromLink.toUpperCase();
+  joinPanel.hidden = false;
 }
+
+showHome();
